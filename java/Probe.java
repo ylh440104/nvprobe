@@ -7,13 +7,22 @@ import android.os.Parcel;
 
 import java.lang.reflect.Method;
 
+class Conn implements ServiceConnection {
+    public void onServiceConnected(ComponentName n, IBinder b) {
+        System.out.println("[+] connected: " + n + " binder=" + b);
+        Probe.svc = b;
+    }
+    public void onServiceDisconnected(ComponentName n) {
+        System.out.println("[-] disconnected: " + n);
+    }
+}
+
 public class Probe {
     static final String PKG = "com.huaqin.NvService";
     static final String CLS = "com.huaqin.NvService.FactoryNvramService";
     static final String DESC = "aidl.NvAidlService";
 
     static IBinder svc;
-    static final Object lock = new Object();
 
     static void call(IBinder b, int code, int a1, int a2) {
         try {
@@ -47,13 +56,10 @@ public class Probe {
 
     static Context getSystemContext() throws Exception {
         Class<?> looper = Class.forName("android.os.Looper");
-        Method prepare = looper.getMethod("prepare");
-        prepare.invoke(null);
+        looper.getMethod("prepare").invoke(null);
         Class<?> at = Class.forName("android.app.ActivityThread");
-        Method systemMain = at.getMethod("systemMain");
-        Object thread = systemMain.invoke(null);
-        Method getCtx = at.getMethod("getSystemContext");
-        return (Context) getCtx.invoke(thread);
+        Object thread = at.getMethod("systemMain").invoke(null);
+        return (Context) at.getMethod("getSystemContext").invoke(thread);
     }
 
     public static void main(String[] args) {
@@ -65,44 +71,22 @@ public class Probe {
             it.setComponent(new ComponentName(PKG, CLS));
             it.setAction("com.huaqin.action.factoryNv");
 
-            ServiceConnection conn = new ServiceConnection() {
-                public void onServiceConnected(ComponentName n, IBinder b) {
-                    System.out.println("[+] connected: " + n + " binder=" + b);
-                    svc = b;
-                    synchronized (lock) { lock.notifyAll(); }
-                }
-                public void onServiceDisconnected(ComponentName n) {
-                    System.out.println("[-] disconnected: " + n);
-                }
-            };
-
+            Conn conn = new Conn();
             boolean r = ctx.bindService(it, conn, Context.BIND_AUTO_CREATE);
             System.out.println("[*] bindService=" + r);
 
             Class<?> looper = Class.forName("android.os.Looper");
             Object mainLooper = looper.getMethod("myLooper").invoke(null);
-            Method loop = looper.getMethod("loop");
             final Method quit = looper.getMethod("quit");
             final Object fl = mainLooper;
 
-            new Thread() {
-                public void run() {
-                    try {
-                        long d = System.currentTimeMillis() + 8000;
-                        while (svc == null && System.currentTimeMillis() < d) {
-                            Thread.sleep(200);
-                        }
-                        Thread.sleep(500);
-                        quit.invoke(fl);
-                    } catch (Throwable t) {
-                        t.printStackTrace();
-                    }
-                }
-            }.start();
+            Waiter w = new Waiter(quit, fl);
+            w.start();
 
             System.out.println("[*] entering looper");
-            loop.invoke(mainLooper);
+            looper.getMethod("loop").invoke(mainLooper);
             System.out.println("[*] looper done");
+
             if (svc == null) {
                 System.out.println("[-] binder not obtained (timeout)");
                 return;
@@ -113,6 +97,24 @@ public class Probe {
             call(svc, 1, 0, 0);
             call(svc, 2, 0, 0);
             call(svc, 3, 0, 0);
+        } catch (Throwable t) {
+            t.printStackTrace();
+        }
+    }
+}
+
+class Waiter extends Thread {
+    Method quit;
+    Object looper;
+    Waiter(Method q, Object l) { quit = q; looper = l; }
+    public void run() {
+        try {
+            long d = System.currentTimeMillis() + 6000;
+            while (Probe.svc == null && System.currentTimeMillis() < d) {
+                Thread.sleep(200);
+            }
+            Thread.sleep(1000);
+            quit.invoke(looper);
         } catch (Throwable t) {
             t.printStackTrace();
         }
