@@ -47,9 +47,13 @@ jobs:
           "$BT/aapt2" link -o unsign.apk \
             --manifest apk/AndroidManifest.xml \
             -I sdk/android.jar \
-            --min-sdk-version 33 --target-sdk-version 33 \
-            -R out/classes.dex
-          ls -la unsign.apk || true
+            --min-sdk-version 33 --target-sdk-version 33
+          ls -la unsign.apk
+          cd out
+          cp classes.dex ../classes.dex
+          cd ..
+          zip -j unsign.apk classes.dex
+          unzip -l unsign.apk
 
       - name: Sign
         run: |
