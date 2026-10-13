@@ -23,31 +23,52 @@ public class MainActivity extends Activity {
         System.out.println("[NVP] " + s);
     }
 
-    static String read(IBinder b, int code, int a1, int a2) {
+    static String read(int code, int a1, int a2) {
         try {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             data.writeInterfaceToken(DESC);
             data.writeInt(a1);
             data.writeInt(a2);
-            boolean ok = b.transact(code, data, reply, 0);
+            boolean ok = b_transact(data, reply, code);
             int ex = reply.readInt();
             String r = (ex == 0) ? reply.readString() : null;
             data.recycle();
             reply.recycle();
             log("R code=" + code + " (" + a1 + "," + a2 + ") ok=" + ok + " ex=" + ex
                     + " len=" + (r == null ? -1 : r.length()));
-            if (r != null && r.length() > 40) {
-                for (int k = 0; k < r.length(); k += 40) {
-                    log("  HEX[" + k + "] " + r.substring(k, Math.min(k+40, r.length())));
-                }
-            } else {
-                log("  V " + r);
-            }
             return r;
         } catch (Throwable t) {
             log("R EX: " + t);
             return null;
+        }
+    }
+
+    static boolean b_transact(Parcel data, Parcel reply, int code) {
+        try {
+            return svc.transact(code, data, reply, 0);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    static boolean write(int code, int a1, int a2) {
+        try {
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            data.writeInterfaceToken(DESC);
+            data.writeInt(a1);
+            data.writeInt(a2);
+            boolean ok = svc.transact(code, data, reply, 0);
+            int ex = reply.readInt();
+            int r = (ex == 0) ? reply.readInt() : -999;
+            data.recycle();
+            reply.recycle();
+            log("W code=" + code + " (" + a1 + "," + a2 + ") ok=" + ok + " ex=" + ex + " ret=" + r);
+            return true;
+        } catch (Throwable t) {
+            log("W EX: " + t);
+            return false;
         }
     }
 
@@ -64,14 +85,26 @@ public class MainActivity extends Activity {
                     svc = bb;
                     new Thread() {
                         public void run() {
-                            log("desc=" + safeDesc());
-                            log("--- read full raw (read only) ---");
-                            read(svc, 2, 0, 0);
-                            read(svc, 2, 0, 32);
-                            read(svc, 2, 0, 64);
-                            read(svc, 2, 0, 96);
-                            read(svc, 2, 0, 160);
-                            read(svc, 2, 0, 256);
+                            try {
+                                log("desc=" + svc.getInterfaceDescriptor());
+                                log("STEP1 read-before");
+                                String before = read(2, 0, 256);
+                                String beforeB = before == null ? null : before.substring(0, 64);
+                                log("before64=" + beforeB);
+
+                                log("STEP2 idempotent write-back (identical full range)");
+                                write(3, 0, 256);
+
+                                log("STEP3 read-after");
+                                String after = read(2, 0, 256);
+                                String afterB = after == null ? null : after.substring(0, 64);
+                                log("after64=" + afterB);
+
+                                boolean same = before != null && before.equals(after);
+                                log("RESULT identical=" + same);
+                            } catch (Throwable t) {
+                                log("EX: " + t);
+                            }
                         }
                     }.start();
                 }
@@ -81,9 +114,5 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             log("EX: " + t);
         }
-    }
-
-    String safeDesc() {
-        try { return svc.getInterfaceDescriptor(); } catch (Throwable t) { return "?"; }
     }
 }
