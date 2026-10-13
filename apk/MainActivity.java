@@ -36,8 +36,14 @@ public class MainActivity extends Activity {
             data.recycle();
             reply.recycle();
             log("R code=" + code + " (" + a1 + "," + a2 + ") ok=" + ok + " ex=" + ex
-                    + " len=" + (r == null ? -1 : r.length())
-                    + " v=" + (r == null ? "null" : (r.length() > 90 ? r.substring(0, 90) + ".." : r)));
+                    + " len=" + (r == null ? -1 : r.length()));
+            if (r != null && r.length() > 40) {
+                for (int k = 0; k < r.length(); k += 40) {
+                    log("  HEX[" + k + "] " + r.substring(k, Math.min(k+40, r.length())));
+                }
+            } else {
+                log("  V " + r);
+            }
             return r;
         } catch (Throwable t) {
             log("R EX: " + t);
@@ -59,16 +65,13 @@ public class MainActivity extends Activity {
                     new Thread() {
                         public void run() {
                             log("desc=" + safeDesc());
-                            log("--- full enum (read only) ---");
-                            for (int s = 0; s <= 96; s += 2) {
-                                read(svc, 2, s, 0);
-                            }
-                            log("--- wide ranges ---");
+                            log("--- read full raw (read only) ---");
                             read(svc, 2, 0, 0);
+                            read(svc, 2, 0, 32);
                             read(svc, 2, 0, 64);
                             read(svc, 2, 0, 96);
-                            read(svc, 2, 0, 128);
-                            read(svc, 1, 0, 0);
+                            read(svc, 2, 0, 160);
+                            read(svc, 2, 0, 256);
                         }
                     }.start();
                 }
