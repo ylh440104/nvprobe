@@ -15,6 +15,7 @@ public class MainActivity extends Activity {
     static final String PKG = "com.huaqin.NvService";
     static final String CLS = "com.huaqin.NvService.FactoryNvramService";
     static final String DESC = "aidl.NvAidlService";
+    static final int SEG = 128;
 
     static IBinder svc;
 
@@ -37,9 +38,19 @@ public class MainActivity extends Activity {
             reply.recycle();
             return r;
         } catch (Throwable t) {
-            log("R EX: " + t);
             return null;
         }
+    }
+
+    // read whole 0..1024 in SEG chunks, concat
+    static String readAll() {
+        StringBuilder sb = new StringBuilder();
+        for (int s = 0; s < 1024; s += SEG) {
+            String r = readHex(s, s + SEG);
+            if (r == null) r = "";
+            sb.append(r);
+        }
+        return sb.toString();
     }
 
     static int write(int idx, int val) {
@@ -62,7 +73,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // read raw byte at index i
     static int byteAt(int i) {
         String h = readHex(i, i + 1);
         if (h == null || h.length() < 2) return -1;
@@ -83,44 +93,46 @@ public class MainActivity extends Activity {
                     new Thread() {
                         public void run() {
                             try {
-                                int T = 55;   // target index (2nd digit of product code "11")
+                                int T = 55;
                                 log("desc=" + svc.getInterfaceDescriptor());
 
-                                // STEP0 backup
-                                String fullBefore = readHex(0, 1024);
-                                log("BACKUP len=" + (fullBefore == null ? -1 : fullBefore.length()));
-                                log("BACKUP head=" + (fullBefore == null ? "null"
-                                        : fullBefore.substring(0, 128)));
+                                // STEP0 backup (segmented)
+                                String before = readAll();
+                                log("BACKUP len=" + before.length());
+                                log("BACKUP[0..64]=" + before.substring(0, Math.min(64, before.length())));
+
                                 int v0 = byteAt(T);
                                 log("TARGET idx=" + T + " orig=0x" + Integer.toHexString(v0)
                                         + " ('" + (char) v0 + "')");
 
-                                // STEP1 write NEW value (orig '1' -> '2')
-                                int newSel = (v0 == '1') ? 2 : (v0 == '2' ? 1 : 0);
-                                log("STEP1 write idx=" + T + " -> selector " + newSel);
+                                // STEP1 change to a DIFFERENT value
+                                int newSel = (v0 == 0x31) ? 2 : 1;
+                                log("STEP1 write idx=" + T + " selector=" + newSel);
                                 write(T, newSel);
-
                                 int v1 = byteAt(T);
                                 log("VERIFY1 idx=" + T + " = 0x" + Integer.toHexString(v1)
-                                        + " ('" + (char) v1 + "')  changed=" + (v1 != v0));
+                                        + " ('" + (char) v1 + "') changed=" + (v1 != v0));
 
-                                // also confirm neighbors + serial intact
-                                log("NEIGHBOR idx54=0x" + Integer.toHexString(byteAt(54))
-                                        + " idx56=0x" + Integer.toHexString(byteAt(56)));
-                                log("SERIAL head=" + readHex(1, 15));
-
-                                // STEP2 restore original value
-                                int backSel = (v0 == '1') ? 1 : (v0 == '2' ? 2 : 0);
-                                log("STEP2 restore idx=" + T + " -> selector " + backSel);
+                                // STEP2 restore original
+                                int backSel = (v0 == 0x31) ? 1 : (v0 == 0x32 ? 2 : 0);
+                                log("STEP2 restore idx=" + T + " selector=" + backSel);
                                 write(T, backSel);
-
                                 int v2 = byteAt(T);
                                 log("VERIFY2 idx=" + T + " = 0x" + Integer.toHexString(v2)
-                                        + " ('" + (char) v2 + "')  restored=" + (v2 == v0));
+                                        + " ('" + (char) v2 + "') restored=" + (v2 == v0));
 
-                                String fullAfter = readHex(0, 1024);
-                                boolean identical = fullBefore != null && fullBefore.equals(fullAfter);
-                                log("FINAL full-image identical=" + identical);
+                                String after = readAll();
+                                log("FINAL identical=" + before.equals(after));
+                                if (!before.equals(after)) {
+                                    for (int k = 0; k < Math.min(before.length(), after.length()); k++) {
+                                        if (before.charAt(k) != after.charAt(k)) {
+                                            log("DIFF at hexchar " + k + " (byte " + (k/2) + ") "
+                                                    + before.charAt(k) + " -> " + after.charAt(k));
+                                            break;
+                                        }
+                                    }
+                                }
+                                log("SERIAL=" + readHex(1, 15));
                             } catch (Throwable t) {
                                 log("EX: " + t);
                             }
