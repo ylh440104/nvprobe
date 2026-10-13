@@ -35,7 +35,7 @@ jobs:
 
       - name: Dex
         run: |
-          java -cp r8.jar com.android.tools.r8.D8 --min-api 33 --output out out/Probe.class
+          java -cp r8.jar com.android.tools.r8.D8 --min-api 33 --output out $(find out -name '*.class')
           ls -la out
 
       - name: Package
