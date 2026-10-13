@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  dex:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,25 +27,46 @@ jobs:
           curl -sSL -o r8.jar https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.3.37/r8-8.3.37.jar
           ls -la r8.jar
 
-      - name: Compile java
+      - name: Get build-tools
+        run: |
+          curl -sSL -o bt.zip https://dl.google.com/android/repository/build-tools_r34-linux.zip
+          unzip -q bt.zip
+          ls -d android-* 
+
+      - name: Compile
         run: |
           mkdir -p out
-          javac -source 8 -target 8 -bootclasspath sdk/android.jar -d out java/Probe.java
-          ls -la out
-
-      - name: Dex
-        run: |
+          javac -source 8 -target 8 -bootclasspath sdk/android.jar -d out apk/MainActivity.java
           java -cp r8.jar com.android.tools.r8.D8 --min-api 33 --output out $(find out -name '*.class')
           ls -la out
 
-      - name: Package
+      - name: Build apk
         run: |
-          cd out
-          cp classes.dex probe.dex
-          sha256sum probe.dex > probe.dex.sha256
-          cat probe.dex.sha256
+          BT=$(ls -d android-*/ | head -1)
+          echo "build-tools: $BT"
+          "$BT/aapt2" link -o unsign.apk \
+            --manifest apk/AndroidManifest.xml \
+            -I sdk/android.jar \
+            --min-sdk-version 33 --target-sdk-version 33 \
+            -R out/classes.dex
+          ls -la unsign.apk || true
+
+      - name: Sign
+        run: |
+          BT=$(ls -d android-*/ | head -1)
+          keytool -genkeypair -keystore ks.jks -storepass 123456 -keypass 123456 \
+            -alias k -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=t"
+          "$BT/zipalign" -f 4 unsign.apk aligned.apk
+          "$BT/apksigner" sign --ks ks.jks --ks-pass pass:123456 --key-pass pass:123456 \
+            --out probe.apk aligned.apk
+          "$BT/apksigner" verify --print-certs probe.apk || true
+          ls -la probe.apk
+          sha256sum probe.apk > probe.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
           name: probe
-          path: out/probe.dex*
+          path: |
+            probe.apk
+            probe.apk.sha256
