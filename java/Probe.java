@@ -1,10 +1,11 @@
-import android.app.ActivityThread;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.os.IBinder;
 import android.os.Parcel;
+
+import java.lang.reflect.Method;
 
 public class Probe {
     static final String PKG = "com.huaqin.NvService";
@@ -19,10 +20,8 @@ public class Probe {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             data.writeInterfaceToken(DESC);
-            if (code == 1) {
-                data.writeInt(a1);
-            } else {
-                data.writeInt(a1);
+            data.writeInt(a1);
+            if (code != 1) {
                 data.writeInt(a2);
             }
             System.out.println("[*] transact code=" + code + " a1=" + a1 + " a2=" + a2);
@@ -36,7 +35,7 @@ public class Probe {
                 } else {
                     String s = reply.readString();
                     System.out.println("    return string len=" + (s == null ? -1 : s.length())
-                            + " : " + (s == null ? "null" : (s.length() > 120 ? s.substring(0, 120) : s)));
+                            + " : " + (s == null ? "null" : s));
                 }
             }
             data.recycle();
@@ -46,10 +45,17 @@ public class Probe {
         }
     }
 
+    static Context getSystemContext() throws Exception {
+        Class<?> at = Class.forName("android.app.ActivityThread");
+        Method systemMain = at.getMethod("systemMain");
+        Object thread = systemMain.invoke(null);
+        Method getCtx = at.getMethod("getSystemContext");
+        return (Context) getCtx.invoke(thread);
+    }
+
     public static void main(String[] args) {
         try {
-            ActivityThread at = ActivityThread.systemMain();
-            Context ctx = at.getSystemContext();
+            Context ctx = getSystemContext();
             System.out.println("[*] ctx=" + ctx);
 
             Intent it = new Intent();
@@ -81,7 +87,8 @@ public class Probe {
                 return;
             }
 
-            System.out.println("[*] desc=" + svc.getInterfaceDescriptor());
+            String desc = svc.getInterfaceDescriptor();
+            System.out.println("[*] desc=" + desc);
             call(svc, 1, 0, 0);
             call(svc, 2, 0, 0);
             call(svc, 3, 0, 0);
