@@ -23,43 +23,23 @@ public class MainActivity extends Activity {
         System.out.println("[NVP] " + s);
     }
 
-    static String read(int code, int a1, int a2) {
+    static String read(int a1, int a2) {
         try {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             data.writeInterfaceToken(DESC);
             data.writeInt(a1);
             data.writeInt(a2);
-            boolean ok = svc.transact(code, data, reply, 0);
+            boolean ok = svc.transact(2, data, reply, 0);
             int ex = reply.readInt();
             String r = (ex == 0) ? reply.readString() : null;
             data.recycle();
             reply.recycle();
-            log("R code=" + code + " (" + a1 + "," + a2 + ") ex=" + ex + " len=" + (r == null ? -1 : r.length()));
+            log("R (" + a1 + "," + a2 + ") ex=" + ex + " len=" + (r == null ? -1 : r.length()));
             return r;
         } catch (Throwable t) {
             log("R EX: " + t);
             return null;
-        }
-    }
-
-    static int write(int code, int a1, int a2) {
-        try {
-            Parcel data = Parcel.obtain();
-            Parcel reply = Parcel.obtain();
-            data.writeInterfaceToken(DESC);
-            data.writeInt(a1);
-            data.writeInt(a2);
-            boolean ok = svc.transact(code, data, reply, 0);
-            int ex = reply.readInt();
-            int r = (ex == 0) ? reply.readInt() : -999;
-            data.recycle();
-            reply.recycle();
-            log("W code=" + code + " (idx=" + a1 + ", val=" + a2 + ") ok=" + ok + " ex=" + ex + " ret=" + r);
-            return r;
-        } catch (Throwable t) {
-            log("W EX: " + t);
-            return -999;
         }
     }
 
@@ -78,22 +58,14 @@ public class MainActivity extends Activity {
                         public void run() {
                             try {
                                 log("desc=" + svc.getInterfaceDescriptor());
-                                String before = read(2, 0, 64);
-                                log("before_len=" + (before == null ? -1 : before.length()));
-
-                                log("--- idempotent write-back, byte values unchanged ---");
-                                write(3, 0, 0);    // idx0  = '0' (0x30) -> write '0'
-                                write(3, 1, 0);    // idx1  = '0' -> write '0'
-                                write(3, 19, 0);   // idx19 = '0' -> write '0'
-                                write(3, 14, 1);   // idx14 = '1' -> write '1'
-                                write(3, 18, 1);   // idx18 = '1' -> write '1'
-                                write(3, 20, 1);   // idx20 = '1' -> write '1'
-
-                                log("--- read after ---");
-                                String after = read(2, 0, 64);
-                                log("after_len=" + (after == null ? -1 : after.length()));
-                                boolean same = before != null && before.equals(after);
-                                log("RESULT identical=" + same);
+                                // read full 1024-byte item: raw hex is 2048 chars
+                                for (int s = 0; s < 1024; s += 128) {
+                                    String r = read(s, s + 128);
+                                    if (r == null) continue;
+                                    for (int k = 0; k < r.length(); k += 64) {
+                                        log("H[" + s + "+" + k + "] " + r.substring(k, Math.min(k + 64, r.length())));
+                                    }
+                                }
                             } catch (Throwable t) {
                                 log("EX: " + t);
                             }
