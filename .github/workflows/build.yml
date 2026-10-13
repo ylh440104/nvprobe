@@ -31,7 +31,7 @@ jobs:
         run: |
           curl -sSL -o bt.zip https://dl.google.com/android/repository/build-tools_r34-linux.zip
           unzip -q bt.zip
-          ls -d android-* 
+          ls -d android-*
 
       - name: Compile
         run: |
@@ -43,15 +43,11 @@ jobs:
       - name: Build apk
         run: |
           BT=$(ls -d android-*/ | head -1)
-          echo "build-tools: $BT"
           "$BT/aapt2" link -o unsign.apk \
             --manifest apk/AndroidManifest.xml \
             -I sdk/android.jar \
             --min-sdk-version 33 --target-sdk-version 33
-          ls -la unsign.apk
-          cd out
-          cp classes.dex ../classes.dex
-          cd ..
+          cd out && cp classes.dex ../classes.dex && cd ..
           zip -j unsign.apk classes.dex
           unzip -l unsign.apk
 
@@ -59,18 +55,18 @@ jobs:
         run: |
           BT=$(ls -d android-*/ | head -1)
           keytool -genkeypair -keystore ks.jks -storepass 123456 -keypass 123456 \
-            -alias k -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=t"
+            -alias k -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=nvprobe"
           "$BT/zipalign" -f 4 unsign.apk aligned.apk
           "$BT/apksigner" sign --ks ks.jks --ks-pass pass:123456 --key-pass pass:123456 \
-            --out probe.apk aligned.apk
-          "$BT/apksigner" verify --print-certs probe.apk || true
-          ls -la probe.apk
-          sha256sum probe.apk > probe.apk.sha256
+            --out nvprobe.apk aligned.apk
+          "$BT/apksigner" verify --print-certs nvprobe.apk || true
+          ls -la nvprobe.apk
+          sha256sum nvprobe.apk > nvprobe.apk.sha256
+          cat nvprobe.apk.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: probe
+          name: nvprobe
           path: |
-            probe.apk
-            probe.apk.sha256
+            nvprobe.apk
+            nvprobe.apk.sha256
