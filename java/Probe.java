@@ -46,6 +46,9 @@ public class Probe {
     }
 
     static Context getSystemContext() throws Exception {
+        Class<?> looper = Class.forName("android.os.Looper");
+        Method prepare = looper.getMethod("prepare");
+        prepare.invoke(null);
         Class<?> at = Class.forName("android.app.ActivityThread");
         Method systemMain = at.getMethod("systemMain");
         Object thread = systemMain.invoke(null);
@@ -76,12 +79,30 @@ public class Probe {
             boolean r = ctx.bindService(it, conn, Context.BIND_AUTO_CREATE);
             System.out.println("[*] bindService=" + r);
 
-            long deadline = System.currentTimeMillis() + 8000;
-            synchronized (lock) {
-                while (svc == null && System.currentTimeMillis() < deadline) {
-                    lock.wait(500);
+            Class<?> looper = Class.forName("android.os.Looper");
+            Object mainLooper = looper.getMethod("myLooper").invoke(null);
+            Method loop = looper.getMethod("loop");
+            final Method quit = looper.getMethod("quit");
+            final Object fl = mainLooper;
+
+            new Thread() {
+                public void run() {
+                    try {
+                        long d = System.currentTimeMillis() + 8000;
+                        while (svc == null && System.currentTimeMillis() < d) {
+                            Thread.sleep(200);
+                        }
+                        Thread.sleep(500);
+                        quit.invoke(fl);
+                    } catch (Throwable t) {
+                        t.printStackTrace();
+                    }
                 }
-            }
+            }.start();
+
+            System.out.println("[*] entering looper");
+            loop.invoke(mainLooper);
+            System.out.println("[*] looper done");
             if (svc == null) {
                 System.out.println("[-] binder not obtained (timeout)");
                 return;
