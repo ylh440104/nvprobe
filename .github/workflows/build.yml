@@ -24,7 +24,7 @@ jobs:
 
       - name: Get d8
         run: |
-          curl -sSL -o r8.jar https://maven.google.com/com/android/tools/r8/r8/8.3.37/r8-8.3.37.jar
+          curl -sSL -o r8.jar https://dl.google.com/dl/android/maven2/com/android/tools/r8/8.3.37/r8-8.3.37.jar
           ls -la r8.jar
 
       - name: Compile java
