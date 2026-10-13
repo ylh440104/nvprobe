@@ -30,13 +30,12 @@ public class MainActivity extends Activity {
             data.writeInterfaceToken(DESC);
             data.writeInt(a1);
             data.writeInt(a2);
-            boolean ok = b_transact(data, reply, code);
+            boolean ok = svc.transact(code, data, reply, 0);
             int ex = reply.readInt();
             String r = (ex == 0) ? reply.readString() : null;
             data.recycle();
             reply.recycle();
-            log("R code=" + code + " (" + a1 + "," + a2 + ") ok=" + ok + " ex=" + ex
-                    + " len=" + (r == null ? -1 : r.length()));
+            log("R code=" + code + " (" + a1 + "," + a2 + ") ex=" + ex + " len=" + (r == null ? -1 : r.length()));
             return r;
         } catch (Throwable t) {
             log("R EX: " + t);
@@ -44,15 +43,7 @@ public class MainActivity extends Activity {
         }
     }
 
-    static boolean b_transact(Parcel data, Parcel reply, int code) {
-        try {
-            return svc.transact(code, data, reply, 0);
-        } catch (Throwable t) {
-            return false;
-        }
-    }
-
-    static boolean write(int code, int a1, int a2) {
+    static int write(int code, int a1, int a2) {
         try {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
@@ -64,11 +55,11 @@ public class MainActivity extends Activity {
             int r = (ex == 0) ? reply.readInt() : -999;
             data.recycle();
             reply.recycle();
-            log("W code=" + code + " (" + a1 + "," + a2 + ") ok=" + ok + " ex=" + ex + " ret=" + r);
-            return true;
+            log("W code=" + code + " (idx=" + a1 + ", val=" + a2 + ") ok=" + ok + " ex=" + ex + " ret=" + r);
+            return r;
         } catch (Throwable t) {
             log("W EX: " + t);
-            return false;
+            return -999;
         }
     }
 
@@ -87,19 +78,20 @@ public class MainActivity extends Activity {
                         public void run() {
                             try {
                                 log("desc=" + svc.getInterfaceDescriptor());
-                                log("STEP1 read-before");
-                                String before = read(2, 0, 256);
-                                String beforeB = before == null ? null : before.substring(0, 64);
-                                log("before64=" + beforeB);
+                                String before = read(2, 0, 64);
+                                log("before_len=" + (before == null ? -1 : before.length()));
 
-                                log("STEP2 idempotent write-back (identical full range)");
-                                write(3, 0, 256);
+                                log("--- idempotent write-back, byte values unchanged ---");
+                                write(3, 0, 0);    // idx0  = '0' (0x30) -> write '0'
+                                write(3, 1, 0);    // idx1  = '0' -> write '0'
+                                write(3, 19, 0);   // idx19 = '0' -> write '0'
+                                write(3, 14, 1);   // idx14 = '1' -> write '1'
+                                write(3, 18, 1);   // idx18 = '1' -> write '1'
+                                write(3, 20, 1);   // idx20 = '1' -> write '1'
 
-                                log("STEP3 read-after");
-                                String after = read(2, 0, 256);
-                                String afterB = after == null ? null : after.substring(0, 64);
-                                log("after64=" + afterB);
-
+                                log("--- read after ---");
+                                String after = read(2, 0, 64);
+                                log("after_len=" + (after == null ? -1 : after.length()));
                                 boolean same = before != null && before.equals(after);
                                 log("RESULT identical=" + same);
                             } catch (Throwable t) {
