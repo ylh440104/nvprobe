@@ -23,43 +23,54 @@ public class MainActivity extends Activity {
         System.out.println("[NVP] " + s);
     }
 
-    static void call(IBinder b, int code, int a1, int a2) {
+    static String callRead(IBinder b, int code, int a1, int a2) {
         try {
             Parcel data = Parcel.obtain();
             Parcel reply = Parcel.obtain();
             data.writeInterfaceToken(DESC);
             data.writeInt(a1);
-            if (code != 1) {
-                data.writeInt(a2);
-            }
-            log("transact code=" + code + " a1=" + a1 + " a2=" + a2);
+            data.writeInt(a2);
             boolean ok = b.transact(code, data, reply, 0);
-            log("    ok=" + ok);
             int ex = reply.readInt();
-            log("    exception=" + ex);
-            if (ex == 0) {
-                if (code == 3) {
-                    log("    return bool=" + reply.readInt());
-                } else {
-                    String s = reply.readString();
-                    log("    return len=" + (s == null ? -1 : s.length())
-                            + " : " + (s == null ? "null" : s));
-                }
-            }
+            String r = (ex == 0) ? reply.readString() : null;
             data.recycle();
             reply.recycle();
+            log("read code=" + code + " (" + a1 + "," + a2 + ") ok=" + ok
+                    + " ex=" + ex + " len=" + (r == null ? -1 : r.length()));
+            return r;
         } catch (Throwable t) {
-            log("    EX: " + t);
+            log("read EX: " + t);
+            return null;
+        }
+    }
+
+    static boolean callWrite(IBinder b, int code, int a1, int a2) {
+        try {
+            Parcel data = Parcel.obtain();
+            Parcel reply = Parcel.obtain();
+            data.writeInterfaceToken(DESC);
+            data.writeInt(a1);
+            data.writeInt(a2);
+            boolean ok = b.transact(code, data, reply, 0);
+            int ex = reply.readInt();
+            int r = (ex == 0) ? reply.readInt() : -999;
+            data.recycle();
+            reply.recycle();
+            log("write code=" + code + " (" + a1 + "," + a2 + ") ok=" + ok
+                    + " ex=" + ex + " ret=" + r);
+            return r == 1;
+        } catch (Throwable t) {
+            log("write EX: " + t);
+            return false;
         }
     }
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        log("onCreate");
+        log("onCreate uid=" + android.os.Process.myUid());
         try {
-            log("self pkg=" + getPackageName() + " uid=" + android.os.Process.myUid());
-            log("service uid check: " + getPackageManager().getApplicationInfo(PKG, 0).uid);
+            log("service uid=" + getPackageManager().getApplicationInfo(PKG, 0).uid);
 
             Intent it = new Intent();
             it.setComponent(new ComponentName(PKG, CLS));
@@ -67,27 +78,32 @@ public class MainActivity extends Activity {
 
             ServiceConnection conn = new ServiceConnection() {
                 public void onServiceConnected(ComponentName n, IBinder bnd) {
-                    log("connected: " + n + " binder=" + bnd);
+                    log("connected binder=" + bnd);
                     svc = bnd;
-                    try {
-                        log("desc=" + bnd.getInterfaceDescriptor());
-                    } catch (Throwable t) {}
                     new Thread() {
                         public void run() {
-                            call(svc, 1, 0, 0);
-                            call(svc, 2, 0, 0);
-                            call(svc, 3, 0, 0);
-                            call(svc, 1, 1, 0);
-                            call(svc, 2, 0, 32);
+                            try {
+                                log("desc=" + svc.getInterfaceDescriptor());
+                                String full = callRead(svc, 2, 0, 0);
+                                log("full value: " + (full == null ? "null"
+                                        : (full.length() > 160 ? full.substring(0, 160) : full)));
+                                callRead(svc, 2, 0, 16);
+                                callRead(svc, 2, 16, 32);
+                                callRead(svc, 1, 0, 0);
+                                callRead(svc, 1, 1, 0);
+                                callWrite(svc, 3, 0, 0);
+                                callWrite(svc, 3, 1, 0);
+                            } catch (Throwable t) {
+                                log("EX: " + t);
+                            }
                         }
                     }.start();
                 }
                 public void onServiceDisconnected(ComponentName n) {
-                    log("disconnected: " + n);
+                    log("disconnected");
                 }
             };
-            boolean r = bindService(it, conn, Context.BIND_AUTO_CREATE);
-            log("bindService=" + r);
+            log("bindService=" + bindService(it, conn, Context.BIND_AUTO_CREATE));
         } catch (Throwable t) {
             log("EX: " + t);
         }
